@@ -26,20 +26,21 @@ import org.apache.zookeeper.data.Stat;
 // this process should never be invoked, as the "this" watcher is used
 
 //public class zkMember implements Watcher{
-public class zkLeader {
+public class zkLeader implements Watcher{
 
 	private static String rootMembers = "/members";
 	private static String aMember = "/member-";
 	private String myId;
-	
+
 	private ZooKeeper zk;
-	
+
 	// This is static. A list of zookeeper can be provided for decide where to connect
 	String[] zkHosts = {"127.0.0.1:2181", "127.0.0.1:2182", "127.0.0.1:2183"};
 
 	private static final int SESSION_TIMEOUT = 5000;
 
-	public zkMember () {
+	//CONTRUCTOR COPIADO DE ZKMEMBER
+	public zkLeader () {
 
 		// Select a random zookeeper server
 		Random rand = new Random();
@@ -139,6 +140,6 @@ public class zkLeader {
 		System.out.println();
 	}
 
-	
+
 }
 
