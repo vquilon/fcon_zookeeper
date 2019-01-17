@@ -1,11 +1,7 @@
 package es.upm.dit.fcon;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.util.Random;
 import java.util.Scanner;
-
-import org.apache.zookeeper.KeeperException;
 
 public class MainBank {
 	public MainBank() {
@@ -63,7 +59,7 @@ public class MainBank {
 		return new BankClient(accNumber, name, balance);
 	}
 
-	public static void main(String[] args) {
+	public static void main(String[] args) throws ClassNotFoundException, IOException {
 
 		boolean correct_pre = false;
 		int     menuKey_pre = 0;
@@ -74,8 +70,6 @@ public class MainBank {
 		int accNumber   = 0;
 		int balance     = 0;
 		BankClient bankClient   = null;
-		boolean status  = false;
-		String cluster  = null;
 		
 		boolean bank_znode = false;
 		/*if (args.length == 0) {
@@ -102,7 +96,6 @@ public class MainBank {
 			switch (menuKey_pre) {
 			case 1: // Create BANK node
 				//Create Bank with Election Leader with ZooKeeper
-				
 				bank_znode = true;
 				
 				break;
@@ -178,25 +171,27 @@ public class MainBank {
 							System.out.println("The provised text provided is not an integer");
 							sc.next();
 						}
-						bank.updateBankClient(accNumber, balance);
+						//bank.updateBankClient(accNumber, balance);
+						comm.updateBankClient(accNumber, balance);
 						break;
 					case 4: // Delete client
 						System. out .print(">>> Enter account number (int) = ");
 						if (sc.hasNextInt()) {
 							accNumber = sc.nextInt();
-							status = bank.deleteBankClient(accNumber);
+							//status = bank.deleteBankClient(accNumber);
+							comm.deleteBankClient(accNumber);
 						} else {
 							System.out.println("The provised text provided is not an integer");
 							sc.next();
 						}
 						break;
-					case 5:
+					/*case 5:
 						String aux = bank.toString();
 						System.out.println(bank.toString());
-						break;
+						break;*/
 					case 6:
 						exit = true;	
-						bank.close();
+						//bank.close();
 					default:
 						break;
 					}
