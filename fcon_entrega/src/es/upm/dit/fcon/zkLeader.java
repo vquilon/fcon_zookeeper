@@ -99,6 +99,11 @@ public class zkLeader implements Watcher{
 				}
 			}
 		};*/
+	
+	
+	public ZooKeeper getZK() {
+		return zk;
+	}
 
 	/**
 	 * Leader Election
@@ -180,14 +185,13 @@ public class zkLeader implements Watcher{
 			if(tmp.compareTo(s) > 0)
 				tmp = s;	
 		}
-		//myId = tmp;
 		// i contains the smallest sequence number
 		String leader = ELECTION_PATH + "/" + tmp;
 		Stat s = zk.exists(leader, true);
 
 		// syso
-		System.out.println("BANK ELECTION "+myId+":: Leader is the owner of znode: " + leader);
-		System.out.println("BANK ELECTION "+myId+":: Leader id: " + s.getEphemeralOwner());
+		System.out.println("BANK ELECTION "+myId+" :: Leader is the owner of znode: " + leader);
+		System.out.println("BANK ELECTION "+myId+" :: Leader id: " + s.getEphemeralOwner());
 
 		//Comprobar si el bank es lider del banco y cambiar la variable isLeader
 		if(myId.equals(leader)) {
@@ -200,31 +204,35 @@ public class zkLeader implements Watcher{
 	}
 	@Override
 	public void process(WatchedEvent event) {
-
+		System.out.println("BANK ELECTION "+myId+" :: "+event.getType()+" | ZNode: " + event.getPath());
 		switch (event.getType()){
 
 		case NodeChildrenChanged:
-			System.out.println("BANK ELECTION"+myId+" :: NodeChildrenChanged | ZNode: " + event.getPath());
+			System.out.println("BANK ELECTION "+myId+" :: NodeChildrenChanged | ZNode: " + event.getPath());
 
 			break;
 
 		case NodeCreated:
-			System.out.println("BANK ELECTION"+myId+" :: NodeCreated | ZNode: " + event.getPath());
+			System.out.println("BANK ELECTION "+myId+" :: NodeCreated | ZNode: " + event.getPath());
 			break;
 
 		case NodeDataChanged:
-			System.out.println("BANK ELECTION"+myId+" :: NodeDataChanged | ZNode: " + event.getPath());
+			System.out.println("BANK ELECTION "+myId+" :: NodeDataChanged | ZNode: " + event.getPath());
 			break;
 
 		case NodeDeleted:
-			System.out.println("BANK ELECTION"+myId+" :: NodeDeleted | ZNode: " + event.getPath());
-			System.out.println("BANK ELECTION"+myId+" :: Leader was lost, newLeaderElection started.");
+			System.out.println("BANK ELECTION "+myId+" :: NodeDeleted | ZNode: " + event.getPath());
+			System.out.println("BANK ELECTION "+myId+" :: Leader was lost, newLeaderElection started.");
 			try {
 				newLeaderElection();
 			} catch (KeeperException e) {
 				e.printStackTrace();
 			} catch (InterruptedException e) {
 				e.printStackTrace();
+			}
+			
+			synchronized(bank.getMutex()) {
+				bank.getMutex().notify();
 			}
 			break;
 
@@ -233,11 +241,11 @@ public class zkLeader implements Watcher{
 			switch (event.getState()){
 
 			case Disconnected:
-				System.out.println("BANK ELECTION"+myId+" :: Disconnected.");
+				System.out.println("BANK ELECTION "+myId+" :: Disconnected.");
 				break;
 
 			case Expired:
-				System.out.println("BANK ELECTION"+myId+" :: Expired.");
+				System.out.println("BANK ELECTION "+myId+" :: Expired.");
 				break;
 
 			/*case NoSyncConnected:
@@ -245,7 +253,7 @@ public class zkLeader implements Watcher{
 				break;*/
 
 			case SyncConnected:
-				System.out.println("BANK ELECTION"+myId+" :: SyncConnected.");
+				System.out.println("BANK ELECTION "+myId+" :: SyncConnected.");
 				/*synchronized (mutex) {
 					mutex.notify();
 				}*/

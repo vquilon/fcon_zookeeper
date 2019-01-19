@@ -9,13 +9,15 @@ import org.jgroups.Address;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Random;
-
+//import java.util.Random;
+import java.util.Set;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.lang.ClassNotFoundException;
+//import java.lang.reflect.Array;
 import java.net.ServerSocket;
 import java.net.Socket;
 
@@ -34,26 +36,31 @@ public class Bank implements Watcher{
 
 	//VARIABLES ZOOKEEPER
 	private ZooKeeper zk = null;
+	private final String ELECTION_PATH="/election";
 	private final String BANKS_PATH = "/banks";
-	//private final String CLIENT_PATH = "/client";
+	private final String DB_PATH = "/db";
 	private final String CHANGES_PATH = "/changes";
 	private Integer mutex = -1;
-	private static final int SESSION_TIMEOUT = 5000;
 	private List<String> listChanges = null;
+
+	private boolean flagNuevo = true;
 
 	private String myId;
 	private zkLeader zkl;
-	//VARIABLES SERVIDOR SOCKETS
-	//static ServerSocket variable
-	private static ServerSocket server;
-	//socket server port on which it will listen
-	private static int port = 3000;
 
+	//VARIABLES SERVIDOR SOCKETS
+	//socket server port on which it will listen
+	//static ServerSocket variable
+	private static ServerSocket server = null;
+	private static ServerSocket serverDB = null;
+	private static int port = 3000;
+	private static int portDB = 4000;
 	public Bank() {
 		bankClientDB = new BankClientDB();
 		try {
 			zkl = new zkLeader(this);
 			myId = zkl.getMyId();
+			zk = zkl.getZK();
 		} catch (KeeperException e) {
 			e.printStackTrace();
 		} catch (InterruptedException e) {
@@ -62,38 +69,9 @@ public class Bank implements Watcher{
 			e.printStackTrace();
 		}
 
-		// This is static. A list of zookeeper can be provided for decide where to connect
-		String[] hosts = {"127.0.0.1:2181", "127.0.0.1:2182", "127.0.0.1:2183"};
-
-		// Select a random zookeeper server
-		Random rand = new Random();
-		int i = rand.nextInt(hosts.length);
-
-		// Create the session
-		// Create a session and wait until it is created.
-		// When is created, the watcher is notified
-		try {
-			if (zk == null) {
-				zk = new ZooKeeper(hosts[i], SESSION_TIMEOUT, this);
-				// We initialize the mutex Integer just after creating ZK.
-				/*try {
-					// Wait for creating the session. Use the object lock
-					synchronized(mutex) {
-						mutex.wait();
-					}
-					//zk.exists("/", false);
-				} catch (Exception e) {
-					// TODO: handle exception
-				}*/
-			}
-		} catch (Exception e) {
-			System.out.println("Exception in constructor");
-		}
-
-		// Add the process to the members in zookeeper
 
 		if (zk != null) {
-			// Create a folder for members and include this process/server
+			// Create a folder for banks/changes
 			try {
 				// Create the /banks/changes znode
 				// Create a folder, if it is not created
@@ -111,9 +89,22 @@ public class Bank implements Watcher{
 				System.out.println("InterruptedException raised");
 			}
 
+			try {
+				// Create the /banks/db
+				// Create a folder, if it is not created
+				Stat sBD = zk.exists(BANKS_PATH + DB_PATH, false);
+				if (sBD == null) {
+					// Created the znode, if it is not created.
+					zk.create(BANKS_PATH + DB_PATH, new byte[0],
+							Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+				}
+			} catch (KeeperException e) {
+				System.out.println("The session with Zookeeper failes. Closing");
+				return;
+			} catch (InterruptedException e) {
+				System.out.println("InterruptedException raised");
+			}
 		}
-
-
 	}
 
 	public boolean isLeader() {
@@ -127,23 +118,36 @@ public class Bank implements Watcher{
 	public void close() throws InterruptedException {
 		zk.close();
 	}
+	public Integer getMutex() {
+		return mutex;
+	}
 
 	public boolean createBankClient(BankClient client) {
 		boolean isCorrect = bankClientDB.createClient(client);
+		List<String> banksFollowers = new ArrayList<String>();
 		if(isLeader) {
 			try {
-				String content = client.toString();
-				content = "CREATE:"+content;
-				ByteBuffer b = ByteBuffer.wrap(content.getBytes("UTF-8"));
-				byte[] value = b.array();
-				
-				// Create a znode for registering as create
-				zk.create(BANKS_PATH + CHANGES_PATH + "/create-", value,
-						Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT_SEQUENTIAL);
+				banksFollowers = zk.getChildren(ELECTION_PATH, false);
+			} catch (KeeperException e) {
+				e.printStackTrace();
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
+			if(banksFollowers.size()>1) {
+				try {
+					String content = client.toString();
+					content = "CREATE:"+content;
+					ByteBuffer b = ByteBuffer.wrap(content.getBytes("UTF-8"));
+					byte[] value = b.array();
 
-			} catch (Exception e) {
-				System.out.println(e.getMessage());
-				System.out.println("Unexpected Exception process barrier");
+					// Create a znode for registering as create
+					zk.create(BANKS_PATH + CHANGES_PATH + "/create-", value,
+							Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT_SEQUENTIAL);
+
+				} catch (Exception e) {
+					System.out.println(e.getMessage());
+					System.out.println("Unexpected Exception process barrier");
+				}
 			}
 		}
 		return isCorrect;
@@ -156,19 +160,30 @@ public class Bank implements Watcher{
 
 	public boolean updateBankClient(int account, int balance) {
 		boolean isCorrect = bankClientDB.updateClient(account, balance);
+
+		List<String> banksFollowers = new ArrayList<String>();
 		if(isLeader) {
 			try {
-				String content = "["+account+","+balance+"]";
-				content = "UPDATE:"+content;
-				ByteBuffer b = ByteBuffer.wrap(content.getBytes("UTF-8"));
-				byte[] value = b.array();
-	
-				// Create a znode for registering as member and get my id
-				zk.create(BANKS_PATH + CHANGES_PATH + "/update-", value,
-						Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT_SEQUENTIAL);
-	
-			} catch (Exception e) {
-				System.out.println("Unexpected Exception process barrier");
+				banksFollowers = zk.getChildren(ELECTION_PATH, false);
+			} catch (KeeperException e) {
+				e.printStackTrace();
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
+			if(banksFollowers.size()>1) {
+				try {
+					String content = "["+account+","+balance+"]";
+					content = "UPDATE:"+content;
+					ByteBuffer b = ByteBuffer.wrap(content.getBytes("UTF-8"));
+					byte[] value = b.array();
+
+					// Create a znode for registering as member and get my id
+					zk.create(BANKS_PATH + CHANGES_PATH + "/update-", value,
+							Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT_SEQUENTIAL);
+
+				} catch (Exception e) {
+					System.out.println("Unexpected Exception process barrier");
+				}
 			}
 		}
 		return isCorrect;
@@ -176,19 +191,29 @@ public class Bank implements Watcher{
 
 	public boolean deleteBankClient(int account) {
 		boolean isCorrect = bankClientDB.deleteClient(account);
+		List<String> banksFollowers = new ArrayList<String>();
 		if(isLeader) {
 			try {
-				String content = Integer.toString(account);
-				content = "DELETE:"+content;
-				ByteBuffer b = ByteBuffer.wrap(content.getBytes("UTF-8"));
-				byte[] value = b.array();
-	
-				// Create a znode for registering as member and get my id
-				zk.create(BANKS_PATH + CHANGES_PATH + "/delete-", value,
-						Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT_SEQUENTIAL);
-	
-			} catch (Exception e) {
-				System.out.println("Unexpected Exception process barrier");
+				banksFollowers = zk.getChildren(ELECTION_PATH, false);
+			} catch (KeeperException e) {
+				e.printStackTrace();
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
+			if(banksFollowers.size()>1) {
+				try {
+					String content = Integer.toString(account);
+					content = "DELETE:"+content;
+					ByteBuffer b = ByteBuffer.wrap(content.getBytes("UTF-8"));
+					byte[] value = b.array();
+
+					// Create a znode for registering as member and get my id
+					zk.create(BANKS_PATH + CHANGES_PATH + "/delete-", value,
+							Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT_SEQUENTIAL);
+
+				} catch (Exception e) {
+					System.out.println("Unexpected Exception process barrier");
+				}
 			}
 		}
 		return isCorrect;
@@ -200,6 +225,7 @@ public class Bank implements Watcher{
 		Stat s = null;
 		String path = null;
 		String data = "";
+		boolean firstimeLeader = true;
 
 		while(true) {
 			if(server == null && isLeader) {
@@ -208,6 +234,17 @@ public class Bank implements Watcher{
 			}
 			//keep listens indefinitely until receives 'exit' call or program terminates
 			if(isLeader) {
+				if(firstimeLeader) {
+					firstimeLeader = false;
+					//Lanza el watcher que maneja los cambios en la base de datos
+					try {
+						zk.getChildren(BANKS_PATH + DB_PATH, dbWatcher, s); 
+					} catch (Exception e) {
+						System.out.println("The path not exists");
+						System.out.println(e);
+					}
+				}
+
 				System.out.println("BANK CHANGES-LEADER "+myId+" :: Waiting for client request");
 
 				//creating socket and waiting for client connection
@@ -228,7 +265,7 @@ public class Bank implements Watcher{
 					} else {
 						responseMessage = bc.toString();
 					}
-					
+
 
 				} else if(message.contains("CREATE") && message.indexOf("CREATE")==0) {
 					System.out.println("BANK CHANGES-LEADER "+myId+" :: CREATE REQUEST FROM CLIENT.");
@@ -237,7 +274,7 @@ public class Bank implements Watcher{
 					String arrayString = message.substring(7);
 					String[] array = arrayString.replace("[", "").replace("]", "").split(",");
 
-					BankClient bc = new BankClient(Integer.parseInt(array[0]),array[1].replace(" ",""),Integer.parseInt(array[2].replace(" ","")));
+					BankClient bc = new BankClient(Integer.parseInt(array[0]),array[1].replace(" ","").replaceAll(";"," "),Integer.parseInt(array[2].replace(" ","")));
 					boolean createdBC = createBankClient(bc);
 					responseMessage = ""+createdBC;
 
@@ -278,10 +315,83 @@ public class Bank implements Watcher{
 				//Al ser un banco follower escucha al lider si manda ordenes en el znode /bank/update
 			} else {
 
+				//Solicitar la base de datos por Sockets
+				if(flagNuevo) {
+					flagNuevo = false;
+					String dirIp = "localhost";
+					try {
+
+						String content = dirIp+":"+portDB;
+						ByteBuffer b = ByteBuffer.wrap(content.getBytes("UTF-8"));
+						byte[] value = b.array();
+
+						zk.create(BANKS_PATH + DB_PATH + "/req-", value,
+								Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT_SEQUENTIAL);
+
+					} catch (Exception e) {
+						System.out.println(e.getMessage());
+						System.out.println("Unexpected Exception process barrier");
+					}
+					if(serverDB == null) {
+						//create the socket server object
+						serverDB = new ServerSocket(portDB);
+					}
+					boolean remainingData = true;
+					//Recibir mensajes del lider mientras aun no se haya recibido entera
+					while(remainingData) {
+						System.out.println("BANK DB "+myId+" :: Waiting for reacieve DB from leader");
+						//creating socket and waiting for client connection or 60 seconds
+						serverDB.setSoTimeout(60000);
+						try {
+							Socket socket=serverDB.accept();
+
+							//read from socket to ObjectInputStream object
+							ObjectInputStream ois = new ObjectInputStream(socket.getInputStream());
+							//convert ObjectInputStream object to String
+							String message = (String) ois.readObject();
+							System.out.println("BANK DB "+myId+" :: Message Length Received: " + message.length());
+
+							//COMPLETAR CON EL ALMACENAMIENTO DE LA BASE DE DATOS ENTERA
+							//[1, Pepito, 1000];[4, Fulanito, 300]...
+							String[] arrayDB = message.split("\\];\\[");
+							arrayDB[0] = arrayDB[0].replaceAll("\\[","");
+							arrayDB[arrayDB.length-1] = arrayDB[arrayDB.length-1].replaceAll("\\]","");
+							//[1, esr, 100]END
+							if(arrayDB[arrayDB.length-1].substring(arrayDB[arrayDB.length-1].length()-3).equals("END")) {
+								remainingData = false;
+								arrayDB[arrayDB.length-1] = arrayDB[arrayDB.length-1].substring(0, arrayDB[arrayDB.length-1].length()-3);
+							}
+							boolean rM = true;
+							for(String dbCli : arrayDB) {
+								String[] adbCli = dbCli.split(",");
+								BankClient bcli = new BankClient(Integer.parseInt(adbCli[0]), adbCli[1].replace(" ", ""),Integer.parseInt(adbCli[2].replace(" ","")));
+								rM = rM && createBankClient(bcli) ;
+							}
+
+							String responseMessage=""+rM;
+							//create ObjectOutputStream object
+							ObjectOutputStream oos = new ObjectOutputStream(socket.getOutputStream());
+							//write object to Socket
+							oos.writeObject(responseMessage);
+							
+							//close resources
+							ois.close();
+							oos.close();
+							socket.close();
+							
+						} catch ( java.io.InterruptedIOException e ) {
+							System.err.println( "Timed Out (60 sec)!" );
+							remainingData = false;
+						}
+					}
+					serverDB.close();
+				}
+
 				try {
 					listChanges = zk.getChildren(BANKS_PATH + CHANGES_PATH, false, s); 
 				} catch (Exception e) {
-					System.out.println("Unexpected Exception process barrier");
+					System.out.println("The path not exists");
+					System.out.println(e);
 					break;
 				}
 
@@ -291,12 +401,12 @@ public class Bank implements Watcher{
 						path = BANKS_PATH + CHANGES_PATH+"/"+listChanges.get(0);
 						//System.out.println(path);
 						byte[] b = zk.getData(path, false, s);
-						
-						
-						
+
+
+
 						s = zk.exists(path, false);
 						//System.out.println(s.getVersion());
-						
+
 
 						/*// Generate random delay
 						Random rand = new Random();
@@ -309,15 +419,15 @@ public class Bank implements Watcher{
 
 							}
 						}*/
-						
+
 						//HAY QUE ASEGURARSE DE QUE CUANDO LO LEAN TODOS SE BORRE
 						zk.delete(path, s.getVersion());
-						
+
 						ByteBuffer buffer = ByteBuffer.wrap(b);
 						data = new String(buffer.array(), "UTF-8");
-						
+
 						System.out.println("++++ BANK CHANGES "+myId+" :: Data: " + data + "; Path: " + path);
-						
+
 						//Dependiendo de que tipo sea se hace una cosa u otra	
 						if(data.contains("CREATE") && data.indexOf("CREATE")==0) {
 							System.out.println("BANK CHANGES "+myId+" :: CREATE REQUEST FROM LEADER.");
@@ -328,7 +438,7 @@ public class Bank implements Watcher{
 
 							BankClient bc = new BankClient(Integer.parseInt(array[0]),array[1].replace(" ", ""),Integer.parseInt(array[2].replace(" ","")));
 							boolean createdBC = createBankClient(bc);
-							
+
 							System.out.println("BANK CHANGES "+myId+" :: CREATE = "+createdBC);
 
 						} else if(data.contains("UPDATE") && data.indexOf("UPDATE")==0) {
@@ -346,10 +456,10 @@ public class Bank implements Watcher{
 							System.out.println("BANK CHANGES "+myId+" :: DELETE REQUEST FROM LEADER.");
 							//DELETE:12
 							boolean deletedBC = deleteBankClient(Integer.parseInt(data.substring(7)));
-							
+
 							System.out.println("BANK CHANGES "+myId+" :: DELETE = "+deletedBC);
 						}
-						
+
 					} catch (Exception e) {
 						// The exception due to a race while getting the list of children, get data and delete. Another
 						// consumer may have deleted a child while the previous access. Then, the exception is simply
@@ -372,7 +482,7 @@ public class Bank implements Watcher{
 				}
 			}
 		}
-		server.close();
+		//server.close();
 	}
 
 	private void printList (List<String> list) {
@@ -410,11 +520,11 @@ public class Bank implements Watcher{
 
 			Stat s = null;
 
-			System.out.println("------------------Watcher Update ------------------");
-			System.out.println("BANK "+myId+" :: Leader: " + event.getType() + ", " + event.getPath());
+			System.out.println("------------------Watcher Changes ------------------");
+			System.out.println("BANK "+myId+" :: " + event.getType() + ", " + event.getPath());
 			try {
 				if (event.getPath().equals(BANKS_PATH + CHANGES_PATH)) {
-					//Obtener los Bank que han recibido 
+
 					listChanges = zk.getChildren(BANKS_PATH + CHANGES_PATH, false, s);
 					System.out.println("Remaining # changes: "+listChanges.size());
 					printList(listChanges);
@@ -430,6 +540,107 @@ public class Bank implements Watcher{
 				System.out.println("Unexpected Exception process");
 			}
 		}
+	};
+
+	Watcher dbWatcher = new Watcher() {
+		public void process(WatchedEvent event) { 
+
+			Stat s = null;
+			System.out.println("------------------Watcher DB ------------------");
+			System.out.println("BANK "+myId+" :: " + event.getType() + ", " + event.getPath());
+
+			List<String> dbReq;
+			try {
+				if (event.getPath().equals(BANKS_PATH + DB_PATH)) {
+					dbReq = zk.getChildren(BANKS_PATH + DB_PATH, dbWatcher, s);
+
+					if(dbReq.size()>0) {
+						//OBTENCION DE LA BASE DE DATOS EN UN STRING
+						boolean remainingData = true;
+						int pre = 0;
+						while(remainingData) {
+							String message="";
+							//Enviar Sockets de 1000 en 1000 entradas de la db
+							java.util.HashMap <Integer, BankClient> db = bankClientDB.getClientDB();
+							Set<Integer> keysSet = db.keySet();
+							Integer[] keys = keysSet.toArray(new Integer[keysSet.size()]);
+							int i=pre;
+							for(i=pre;i<1000&&i<db.size();i++) {
+								//[1, Pepito, 1000];[4, Fulanito, 300]...
+								message=message == "" ? db.get(keys[i]).toString() : message+";"+db.get(keys[i]).toString();
+							}
+							if(db.size()>i) {
+								pre = i;
+							} else {
+								remainingData = false;
+								message=message+"END";
+							}
+
+							for(String dbReq_i : dbReq) {
+								boolean erasedDBReq = false;
+								String path = BANKS_PATH + DB_PATH+"/"+dbReq_i;
+								//System.out.println(path);
+								byte[] b = zk.getData(path, false, s);
+
+								s = zk.exists(path, false);
+								//System.out.println(s.getVersion());
+								//Tiene que enviar toda la base de datos a cada znode que haya, a la direccion que hay guardad en el znode
+								Socket socket = null;
+								ObjectOutputStream oos = null;
+								ObjectInputStream ois = null;
+								//Get the Ip and port of the bank_follower where the leader have to send the db
+								ByteBuffer buffer = ByteBuffer.wrap(b);
+								String[] data = new String(buffer.array(), "UTF-8").split(":");
+
+								//establish socket connection to server
+								try{
+									socket = new Socket(data[0], Integer.parseInt(data[1]));
+									//write to socket using ObjectOutputStream
+									oos = new ObjectOutputStream(socket.getOutputStream());
+									System.out.println("Sending db to Socket Server (Follower Bank)");
+									oos.writeObject(message);
+
+									//read the server response message
+									ois = new ObjectInputStream(socket.getInputStream());
+									String messageResp = (String) ois.readObject();
+									System.out.println("Follower Bank RESPONSE: " + messageResp);
+									//close resources
+									ois.close();
+									oos.close();
+
+									socket.close();
+								} catch (Exception e) {
+									//La peticion de base de datos proviene de un servidor que no
+									//esta disponible
+									zk.delete(path, s.getVersion());
+									erasedDBReq = true;
+								}
+
+								if(!remainingData && !erasedDBReq) {
+									//BORRAR EL ZNODE QUE CREO LA PETICION DE BASE DE DATOS SI YA NO HAY MAS DATOS
+									zk.delete(path, s.getVersion());
+								}
+							}
+						}
+
+
+
+					} else {
+						//Aqui se acaba y se ejcuta cuando se borra el nodo y se tiene que volver a lanzar el watcher
+						System.out.println("------------------Watcher DB END------------------");
+						System.out.println("BANK CHANGES-LEADER "+myId+" :: Waiting for client request");
+					}
+				} else {
+					System.out.println("BANK "+myId+" :: Received a watcher with a path not expected");
+				}
+
+			} catch (Exception e) {
+				System.out.println("Unexpected Exception process");
+				e.printStackTrace();
+			}
+
+		}
+
 	};
 
 }
