@@ -272,7 +272,7 @@ public class Bank implements Watcher{
 					//CREATE:[12,Hola,123]
 					//message.indexOf("[");
 					String arrayString = message.substring(7);
-					String[] array = arrayString.replace("[", "").replace("]", "").split(",");
+					String[] array = arrayString.replace("\\[", "").replace("\\]", "").split(",");
 
 					BankClient bc = new BankClient(Integer.parseInt(array[0]),array[1].replace(" ","").replaceAll(";"," "),Integer.parseInt(array[2].replace(" ","")));
 					boolean createdBC = createBankClient(bc);
@@ -283,7 +283,7 @@ public class Bank implements Watcher{
 					//UPDATE:[12,122]
 					//message.indexOf("[");
 					String arrayString = message.substring(7);
-					String[] array = arrayString.replace("[", "").replace("]", "").split(",");
+					String[] array = arrayString.replace("\\[", "").replace("\\]", "").split(",");
 
 					boolean updatedBC = updateBankClient(Integer.parseInt(array[0]),Integer.parseInt(array[1].replace(" ","")));
 					responseMessage = ""+updatedBC;
@@ -434,7 +434,7 @@ public class Bank implements Watcher{
 							//CREATE:[12,Hola,123]
 							//message.indexOf("[");
 							String arrayString = data.substring(7);
-							String[] array = arrayString.replace("[", "").replace("]", "").split(",");
+							String[] array = arrayString.replace("\\[", "").replace("\\]", "").split(",");
 
 							BankClient bc = new BankClient(Integer.parseInt(array[0]),array[1].replace(" ", ""),Integer.parseInt(array[2].replace(" ","")));
 							boolean createdBC = createBankClient(bc);
@@ -446,7 +446,7 @@ public class Bank implements Watcher{
 							//UPDATE:[12,122]
 							//message.indexOf("[");
 							String arrayString = data.substring(7);
-							String[] array = arrayString.replace("[", "").replace("]", "").split(",");
+							String[] array = arrayString.replace("\\[", "").replace("\\]", "").split(",");
 
 							boolean updatedBC = updateBankClient(Integer.parseInt(array[0]),Integer.parseInt(array[1]));
 
