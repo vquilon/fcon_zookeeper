@@ -29,7 +29,8 @@ public class zkLeader implements Watcher{
 
 	private static final int SESSION_TIMEOUT = 5000;
 
-	private String myId = "/election/ID";
+	private String myIdAbsolute = "/election/ID";
+	private String myId = "n_";
 
 	// This is static. A list of zookeeper can be provided for decide where to connect
 	String[] hosts = {"127.0.0.1:2181", "127.0.0.1:2182", "127.0.0.1:2183"};
@@ -112,33 +113,34 @@ public class zkLeader implements Watcher{
 	 */
 	public void leaderElection() throws KeeperException, InterruptedException{
 		// If is the first client, then it should create the znode "/election"
-		Stat statBansk = zk.exists(BANKS_PATH, false);
-		if(statBansk == null){
+		Stat statBanks = zk.exists(BANKS_PATH, false);
+		if(statBanks == null){
 			String rBanks = zk.create(BANKS_PATH, new byte[0], Ids.OPEN_ACL_UNSAFE,
 					CreateMode.PERSISTENT);
 			System.out.println(rBanks + " created.");
 		}
 		
-		Stat stat = zk.exists(ELECTION_PATH, false);
+		Stat stat = zk.exists(BANKS_PATH+ELECTION_PATH, false);
 		if(stat == null){
 			System.out.println("Im the first bank, creating " + BANKS_PATH+ELECTION_PATH + ".");
 			//String bank = "/bank";
-			String r = zk.create(ELECTION_PATH, new byte[0], Ids.OPEN_ACL_UNSAFE,
+			String r = zk.create(BANKS_PATH+ELECTION_PATH, new byte[0], Ids.OPEN_ACL_UNSAFE,
 					CreateMode.PERSISTENT);
 			System.out.println(r + " created.");
 		}
 
 		// Create znode z with path "BANK/n_" with both SEQUENCE and EPHEMERAL flags
-		String childPath = ELECTION_PATH + "/n_";
+		String childPath = BANKS_PATH+ELECTION_PATH + "/n_";
 
 		childPath = zk.create(childPath, new byte[0], Ids.OPEN_ACL_UNSAFE,
 				CreateMode.EPHEMERAL_SEQUENTIAL);
 
-		myId = childPath;
+		myIdAbsolute = childPath;
+		myId = myIdAbsolute.replace(BANKS_PATH+ELECTION_PATH+"/", "");
 		// Let C be the children of "BANK", and i be the sequence number of z;
 		// Watch for changes on "BANK/n_j", where j is the smallest sequence
 		// number such that j < i and n_j is a znode in C;
-		List<String> children = zk.getChildren(ELECTION_PATH, false);
+		List<String> children = zk.getChildren(BANKS_PATH+ELECTION_PATH, false);
 
 		String tmp = children.get(0);
 
@@ -147,16 +149,16 @@ public class zkLeader implements Watcher{
 				tmp = s_children;	
 		}
 		
-		System.out.println("BANK ELECTION "+myId+":: My leader proposal created. Path = " + childPath + ".");
+		System.out.println("BANK ELECTION "+myId+" :: My leader proposal created. Path = " + childPath + ".");
 
 		// i contains the smallest sequence number
 		//String leader = ELECTION_PATH + "/n_" + i;
-		String leader = ELECTION_PATH + "/" + tmp;
+		String leader = BANKS_PATH+ELECTION_PATH + "/" + tmp;
 		Stat s = zk.exists(leader, true);
 
 		// syso
-		System.out.println("BANK ELECTION "+myId+":: Leader is the owner of znode: " + leader);
-		System.out.println("BANK ELECTION "+myId+":: Leader id: " + s.getEphemeralOwner());
+		System.out.println("BANK ELECTION "+myId+" :: Leader is the owner of znode: " + leader);
+		System.out.println("BANK ELECTION "+myId+" :: Leader id: " + s.getEphemeralOwner());
 
 		//Comprobar si el bank es lider del banco y cambiar la variable isLeader
 		if(childPath.equals(leader)) {
@@ -177,7 +179,7 @@ public class zkLeader implements Watcher{
 
 	public void newLeaderElection() throws KeeperException, InterruptedException{
 
-		List<String> children = zk.getChildren(ELECTION_PATH, false);
+		List<String> children = zk.getChildren(BANKS_PATH+ELECTION_PATH, false);
 
 		String tmp = children.get(0);
 
@@ -186,7 +188,7 @@ public class zkLeader implements Watcher{
 				tmp = s;	
 		}
 		// i contains the smallest sequence number
-		String leader = ELECTION_PATH + "/" + tmp;
+		String leader = BANKS_PATH+ELECTION_PATH + "/" + tmp;
 		Stat s = zk.exists(leader, true);
 
 		// syso
@@ -194,7 +196,7 @@ public class zkLeader implements Watcher{
 		System.out.println("BANK ELECTION "+myId+" :: Leader id: " + s.getEphemeralOwner());
 
 		//Comprobar si el bank es lider del banco y cambiar la variable isLeader
-		if(myId.equals(leader)) {
+		if(myIdAbsolute.equals(leader)) {
 			bank.setLeader();
 		}
 	}
@@ -202,14 +204,16 @@ public class zkLeader implements Watcher{
 	public String getMyId() {
 		return myId;
 	}
+	
 	@Override
-	public void process(WatchedEvent event) {
+	public void process(WatchedEvent event){
 		System.out.println("BANK ELECTION "+myId+" :: "+event.getType()+" | ZNode: " + event.getPath());
+		
 		switch (event.getType()){
 
 		case NodeChildrenChanged:
 			System.out.println("BANK ELECTION "+myId+" :: NodeChildrenChanged | ZNode: " + event.getPath());
-
+		
 			break;
 
 		case NodeCreated:
@@ -247,20 +251,12 @@ public class zkLeader implements Watcher{
 			case Expired:
 				System.out.println("BANK ELECTION "+myId+" :: Expired.");
 				break;
-
-			/*case NoSyncConnected:
-				System.out.println("BANK ELECTION"+myId+" :: NoSyncConnected - Deprecated");
-				break;*/
-
 			case SyncConnected:
 				System.out.println("BANK ELECTION "+myId+" :: SyncConnected.");
 				/*synchronized (mutex) {
 					mutex.notify();
 				}*/
 				break;
-			/*case Unknown:
-				System.out.println("BANK ELECTION"+myId+" :: Unknown - Deprecated");
-				break;*/
 			default:
 				break;
 			}
