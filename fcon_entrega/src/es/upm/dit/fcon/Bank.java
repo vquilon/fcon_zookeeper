@@ -429,99 +429,104 @@ public class Bank implements Watcher{
 					System.out.println(e);
 					break;
 				}
-
+				
+				//Comprueba siempre el ultimo de la lista
+				
 				if (listChanges.size() > 0) {
-					try {
-
-						//CADA FOLLOWER ENVIA UN "ACK" DE YA LO HE HECHO
-						List<String> banks = new ArrayList<String>();
+					for(String change : listChanges) {
 						try {
-							banks = zk.getChildren(BANKS_PATH+ELECTION_PATH, false);
-						} catch (KeeperException e) {
-							e.printStackTrace();
-						} catch (InterruptedException e) {
-							e.printStackTrace();
-						}
-						if(banks.size()>1) {
+
+							//CADA FOLLOWER ENVIA UN "ACK" DE YA LO HE HECHO
+							List<String> banks = new ArrayList<String>();
 							try {
-								String content = "received";
-								byte[] value = ByteBuffer.wrap(content.getBytes("UTF-8")).array();
-
-								Stat sACKChange = zk.exists(BANKS_PATH + ACKS_PATH + "/" + listChanges.get(0), false);
-								//Comprobar que el Leader ha creado la carpeta de acks correspondiente al cambio
-								if(sACKChange != null) {
-									path = BANKS_PATH + CHANGES_PATH+"/"+listChanges.get(0);
-									//System.out.println(path);
-									byte[] b = zk.getData(path, false, s);
-
-
-									s = zk.exists(path, false);
-
-									ByteBuffer buffer = ByteBuffer.wrap(b);
-									data = new String(buffer.array(), "UTF-8");
-
-									System.out.println("++++ BANK CHANGES "+myId+" :: Data: " + data + "; Path: " + path);
-
-									//Dependiendo de que tipo sea se hace una cosa u otra	
-									if(data.contains("CREATE") && data.indexOf("CREATE")==0) {
-										System.out.println("BANK CHANGES "+myId+" :: CREATE REQUEST FROM LEADER.");
-										//CREATE:[12,Hola,123]
-										//message.indexOf("[");
-										String arrayString = data.substring(7);
-										String[] array = arrayString.replace("[", "").replace("]", "").split(",");
-
-										BankClient bc = new BankClient(Integer.parseInt(array[0]),array[1].replace(" ", ""),Integer.parseInt(array[2].replace(" ","")));
-										boolean createdBC = createBankClient(bc);
-
-										System.out.println("BANK CHANGES "+myId+" :: CREATE = "+createdBC);
-
-									} else if(data.contains("UPDATE") && data.indexOf("UPDATE")==0) {
-										System.out.println("BANK CHANGES "+myId+" :: UPDATE REQUEST FROM LEADER.");
-										//UPDATE:[12,122]
-										//message.indexOf("[");
-										String arrayString = data.substring(7);
-										String[] array = arrayString.replace("[", "").replace("]", "").split(",");
-
-										boolean updatedBC = updateBankClient(Integer.parseInt(array[0]),Integer.parseInt(array[1]));
-
-										System.out.println("BANK CHANGES "+myId+" :: UPDATE = "+updatedBC);
-
-									} else if(data.contains("DELETE") && data.indexOf("DELETE")==0) {
-										System.out.println("BANK CHANGES "+myId+" :: DELETE REQUEST FROM LEADER.");
-										//DELETE:12
-										boolean deletedBC = deleteBankClient(Integer.parseInt(data.substring(7)));
-
-										System.out.println("BANK CHANGES "+myId+" :: DELETE = "+deletedBC);
-									}
-
-									// CREAR UN ZNODE ACK PARA LA PETICION DE CAMBIO QUE GENERO EL LIDER
-									System.out.println("BANK CHANGES "+myId+" :: Created a ACK znode to the Leader");
-									Stat sACK = zk.exists(BANKS_PATH + ACKS_PATH + "/" + listChanges.get(0) + "/ack-"+myId, false);
-									if(sACK == null) {
-										zk.create(BANKS_PATH + ACKS_PATH + "/" + listChanges.get(0) + "/ack-"+myId, value,
-												Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL);
-
-										//Paramos la ejecucion hasta que se le mande otro cambio
-										synchronized(mutex) {
-											mutex.wait();
-										}
-									}
-								}
-
-							} catch (Exception e) {
+								banks = zk.getChildren(BANKS_PATH+ELECTION_PATH, false);
+							} catch (KeeperException e) {
+								e.printStackTrace();
+							} catch (InterruptedException e) {
 								e.printStackTrace();
 							}
-						}
+							if(banks.size()>1) {
+								try {
+									String content = "received";
+									byte[] value = ByteBuffer.wrap(content.getBytes("UTF-8")).array();
 
-					} catch (Exception e) {
-						// The exception due to a race while getting the list of children, get data and delete. Another
-						// consumer may have deleted a child while the previous access. Then, the exception is simply
-						// implies that the data has not been produced.
-						System.out.println("Exception when accessing the data in the znode, maybe the znode is deleted");
-						System.err.println(e);
-						//e.printStackTrace();
-						//break;
+									Stat sACKChange = zk.exists(BANKS_PATH + ACKS_PATH + "/" + change, false);
+									//Comprobar que el Leader ha creado la carpeta de acks correspondiente al cambio
+									if(sACKChange != null) {
+										path = BANKS_PATH + CHANGES_PATH+"/"+listChanges.get(0);
+										//System.out.println(path);
+										byte[] b = zk.getData(path, false, s);
+
+
+										s = zk.exists(path, false);
+
+										ByteBuffer buffer = ByteBuffer.wrap(b);
+										data = new String(buffer.array(), "UTF-8");
+
+										System.out.println("++++ BANK CHANGES "+myId+" :: Data: " + data + "; Path: " + path);
+
+										//Dependiendo de que tipo sea se hace una cosa u otra	
+										if(data.contains("CREATE") && data.indexOf("CREATE")==0) {
+											System.out.println("BANK CHANGES "+myId+" :: CREATE REQUEST FROM LEADER.");
+											//CREATE:[12,Hola,123]
+											//message.indexOf("[");
+											String arrayString = data.substring(7);
+											String[] array = arrayString.replace("[", "").replace("]", "").split(",");
+
+											BankClient bc = new BankClient(Integer.parseInt(array[0]),array[1].replace(" ", ""),Integer.parseInt(array[2].replace(" ","")));
+											boolean createdBC = createBankClient(bc);
+
+											System.out.println("BANK CHANGES "+myId+" :: CREATE = "+createdBC);
+
+										} else if(data.contains("UPDATE") && data.indexOf("UPDATE")==0) {
+											System.out.println("BANK CHANGES "+myId+" :: UPDATE REQUEST FROM LEADER.");
+											//UPDATE:[12,122]
+											//message.indexOf("[");
+											String arrayString = data.substring(7);
+											String[] array = arrayString.replace("[", "").replace("]", "").split(",");
+
+											boolean updatedBC = updateBankClient(Integer.parseInt(array[0]),Integer.parseInt(array[1]));
+
+											System.out.println("BANK CHANGES "+myId+" :: UPDATE = "+updatedBC);
+
+										} else if(data.contains("DELETE") && data.indexOf("DELETE")==0) {
+											System.out.println("BANK CHANGES "+myId+" :: DELETE REQUEST FROM LEADER.");
+											//DELETE:12
+											boolean deletedBC = deleteBankClient(Integer.parseInt(data.substring(7)));
+
+											System.out.println("BANK CHANGES "+myId+" :: DELETE = "+deletedBC);
+										}
+
+										// CREAR UN ZNODE ACK PARA LA PETICION DE CAMBIO QUE GENERO EL LIDER
+										System.out.println("BANK CHANGES "+myId+" :: Created a ACK znode to the Leader");
+										Stat sACK = zk.exists(BANKS_PATH + ACKS_PATH + "/" + change + "/ack-"+myId, false);
+										if(sACK == null) {
+											zk.create(BANKS_PATH + ACKS_PATH + "/" + change + "/ack-"+myId, value,
+													Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL);
+
+											//Paramos la ejecucion hasta que se le mande otro cambio
+											synchronized(mutex) {
+												mutex.wait();
+											}
+										}
+									}
+
+								} catch (Exception e) {
+									e.printStackTrace();
+								}
+							}
+
+						} catch (Exception e) {
+							// The exception due to a race while getting the list of children, get data and delete. Another
+							// consumer may have deleted a child while the previous access. Then, the exception is simply
+							// implies that the data has not been produced.
+							System.out.println("Exception when accessing the data in the znode, maybe the znode is deleted");
+							System.err.println(e);
+							//e.printStackTrace();
+							//break;
+						}
 					}
+					
 				} else {
 					try {
 						//k.getChildren(BANKS_PATH + CHANGES_PATH, changesWatcher, s);
