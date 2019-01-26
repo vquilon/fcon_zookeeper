@@ -121,7 +121,7 @@ public class MainBank {
 		}
 		
 		else {
-			zkComm comm = new zkComm();
+			Comm comm = new Comm();
 			while (!exit && !bank_znode) {
 				try {
 					correct = false;

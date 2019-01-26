@@ -163,10 +163,23 @@ public class Bank implements Watcher{
 							Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT_SEQUENTIAL);
 
 					// Created the znode acks, if it is not created.
-					String ackChange = zk.create(change.replace(CHANGES_PATH, ACKS_PATH), new byte[0],
-							Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+					//Se crea con la lista de nodos que había en ese momento online
 
-					zk.getChildren(ackChange, acksWatcher);
+					String listStringFollowerAllowed = "";
+					for(String follower : banksFollowers) {
+						//n_00001 -> 00001,00002,00004
+						if(!follower.equals(myId)) {
+							listStringFollowerAllowed = listStringFollowerAllowed+(listStringFollowerAllowed.equals("") ? follower.substring(2) : ","+follower.substring(2));
+						}
+					}
+					byte[] listBanksString = ByteBuffer.wrap(listStringFollowerAllowed.getBytes("UTF-8")).array();
+
+
+
+					String ackChange = zk.create(change.replace(CHANGES_PATH, ACKS_PATH), listBanksString,
+							Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+					//condicion de carrera, crean el ack pero el lider no estaba escuchando
+					zk.getChildren(ackChange, acksWatcher, null);
 				} catch (Exception e) {
 					System.out.println(e.getMessage());
 					System.out.println("Unexpected Exception process barrier");
@@ -204,10 +217,19 @@ public class Bank implements Watcher{
 					System.out.println("BANK-LEADER CHANGES "+myId+" :: New UPDATED_znode for the followers");
 					String change = zk.create(BANKS_PATH + CHANGES_PATH + "/update-", value,
 							Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT_SEQUENTIAL);
+
+					String listStringFollowerAllowed = "";
+					for(String follower : banksFollowers) {
+						//n_00001 -> 00001,00002,00004
+						if(!follower.equals(myId)) {
+							listStringFollowerAllowed = listStringFollowerAllowed+(listStringFollowerAllowed.equals("") ? follower.substring(2) : ","+follower.substring(2));
+						}
+					}
+					byte[] listBanksString = ByteBuffer.wrap(listStringFollowerAllowed.getBytes("UTF-8")).array();
 					// Created the znode acks, if it is not created.
-					String ackChange = zk.create(change.replace(CHANGES_PATH, ACKS_PATH), new byte[0],
+					String ackChange = zk.create(change.replace(CHANGES_PATH, ACKS_PATH), listBanksString,
 							Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
-					zk.getChildren(ackChange, acksWatcher);
+					zk.getChildren(ackChange, acksWatcher, null);
 
 				} catch (Exception e) {
 					System.out.println("Unexpected Exception process barrier");
@@ -240,11 +262,20 @@ public class Bank implements Watcher{
 					String change = zk.create(BANKS_PATH + CHANGES_PATH + "/delete-", value,
 							Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT_SEQUENTIAL);
 
+					String listStringFollowerAllowed = "";
+					for(String follower : banksFollowers) {
+						//n_00001 -> 00001,00002,00004
+						if(!follower.equals(myId)) {
+							listStringFollowerAllowed = listStringFollowerAllowed+(listStringFollowerAllowed.equals("") ? follower.substring(2) : ","+follower.substring(2));
+						}
+					}
+					byte[] listBanksString = ByteBuffer.wrap(listStringFollowerAllowed.getBytes("UTF-8")).array();
+
 					// Created the znode acks, if it is not created.
-					String ackChange = zk.create(change.replace(CHANGES_PATH, ACKS_PATH), new byte[0],
+					String ackChange = zk.create(change.replace(CHANGES_PATH, ACKS_PATH), listBanksString,
 							Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
 
-					zk.getChildren(ackChange, acksWatcher);
+					zk.getChildren(ackChange, acksWatcher, null);
 
 				} catch (Exception e) {
 					System.out.println("Unexpected Exception process barrier");
@@ -278,6 +309,131 @@ public class Bank implements Watcher{
 						System.out.println("The path not exists");
 						System.out.println(e);
 					}
+
+					//Ver que los acks esten todos y borrar los cambios y acks que esten completos si no crear un watcher y borrar su ack si estuviera
+					try {
+						List<String> banks = new ArrayList<String>();
+						try {
+							banks = zk.getChildren(BANKS_PATH+ELECTION_PATH, false);
+						} catch (KeeperException | InterruptedException e) {
+							e.printStackTrace();
+						}
+						List<String> listChanges = new ArrayList<String>();
+						try {
+							listChanges = zk.getChildren(BANKS_PATH+CHANGES_PATH, false);
+						} catch (KeeperException | InterruptedException e) {
+							e.printStackTrace();
+						}
+						if(listChanges.size()>0) {
+							//For para todos los changes
+							for(String change : listChanges) {
+								//Lista de acks enviados por los bancos znodes a un cambio
+								List<String> listIndACKs = new ArrayList<String>();
+								try {
+									//Obtiene la lista de los acks
+									listIndACKs = zk.getChildren(BANKS_PATH+ACKS_PATH + "/" + change, false, s);
+								} catch (KeeperException | InterruptedException e) { 
+									e.printStackTrace();
+								}
+
+
+								s = zk.exists(BANKS_PATH+ACKS_PATH + "/" + change, false);
+								byte[] b = zk.getData(BANKS_PATH+ACKS_PATH + "/" + change, false, s);
+
+
+								ByteBuffer buffer = ByteBuffer.wrap(b);
+								String listIdStringBanksACKChanges = new String(buffer.array(), "UTF-8");
+
+								String[] listIdBanksACKChanges = listIdStringBanksACKChanges.split(",");
+
+								//Compara la lista de ACKS que hay con la lista de followers que enviaron ACKS 
+								//guardado dentro del znode .../acks/update-0001 menos el mismo
+
+								//Numero de Followers admitidos que hay para enviar ACK en este cambio
+								int numberOfFollowers = listIdBanksACKChanges.length;
+								//Numero de ACKs solo se muestran para los nodos en linea que sean Followers y Lider si ha habido reeleccion
+								int numberOfACKs = listIndACKs.size();
+								for(String oneFollower : listIdBanksACKChanges) {
+
+									//El lider borra sus acks
+									if(("n_"+oneFollower).equals(myId)) {
+										//Quiere decir que se decrementa ya que el propio lider esta como ack
+										numberOfFollowers = numberOfFollowers-1;
+										numberOfACKs = numberOfACKs - 1;
+										//Primero borra su ack enviado como follower antes de ser Lider
+										s = zk.exists(BANKS_PATH+ACKS_PATH+"/"+change+"/ack-"+myId, false);
+										if(s!=null) {
+											zk.delete(BANKS_PATH+ACKS_PATH+"/"+change+"/ack-"+myId, s.getVersion());
+										}
+									}
+									//OJO si en la lista de los follower que deberian mandar ACKs si no esta online(/election)
+
+									//Se debe elminar /changes y /acks, hay que ajustar el numero de followers
+									//-Esta en la lista del znode de acks/update-001
+									//-No esta en linea por lo que No esta en ACKs(Ephemeral)
+									if(!banks.contains(("n_"+oneFollower)) && !listIndACKs.contains(("n_"+oneFollower))) {
+										numberOfFollowers = numberOfFollowers - 1;
+									}
+
+									//ESCENARIO #123129: Un Follower conectado con el lider anterior recibe cambios pero antes de efectuarlos
+									//el lider muere, el continua con los cambios y envia los acks(ya el nuevo lider -que puede ser el- se encargara
+									//de gestionar esos acks y borrar los znodes)
+
+									//No se debe eliminar /changes y /acks
+									//-Esta en la lista del zonde de acks/update-001
+									//-Esta en linea
+									//-No esta en ACKs (en este momento pero eventualmente lo enviará)
+
+								}
+								//AHORA SI, comprueba que el numero de ACKs sea el mismo que el que deberia ser(todos los followers enviaron ACK)
+								if (numberOfACKs == numberOfFollowers) {
+									for(String ack_n : listIndACKs) {
+										try {
+
+											byte[] bACK = zk.getData(BANKS_PATH+ACKS_PATH+"/"+change + "/" + ack_n, false, s);
+
+											s = zk.exists(BANKS_PATH+ACKS_PATH+"/"+change + "/" + ack_n, false);
+											//zk.delete(path, s.getVersion());
+
+											ByteBuffer bufferACK = ByteBuffer.wrap(bACK);
+											String dataACK = new String(bufferACK.array(), "UTF-8");
+											//El lider borra todos los ACKS para borrar después el contenedor de ACKs de ese change
+											if(dataACK.equals("received")){
+												zk.delete(BANKS_PATH+ACKS_PATH+"/"+change +"/"+ack_n, s.getVersion());
+											}
+										} catch (Exception e) {
+											e.printStackTrace();
+										}
+									}
+
+									try {
+										//SE BORRA EL ZNODE DE LOS ACKS
+										s = zk.exists(BANKS_PATH+ACKS_PATH+"/"+change, false);
+										zk.delete(BANKS_PATH+ACKS_PATH+"/"+change, s.getVersion());
+
+										//SE BORRA EL ZNODE DE LOS Changes
+										s = zk.exists(BANKS_PATH+CHANGES_PATH+"/"+change, false);
+										zk.delete(BANKS_PATH+CHANGES_PATH+"/"+change, s.getVersion());
+
+									} catch (Exception e) {
+										e.printStackTrace();
+									}
+								} else {
+									//Lanza el Watcher debido a que aun no han contestado todos los integrantes, 
+									//asi cuando conteste otro se lance el watcher
+
+									//Crea el watcher de acks debido a que hay un follower que aun esta guardando los cambios
+									//y este ha sido reelegido como lider
+									zk.getChildren(BANKS_PATH+ACKS_PATH+"/"+change, acksWatcher);
+								}
+							}
+						}
+
+					} catch (Exception e) {
+						System.out.println("Unexpected Exception process");
+					}
+
+
 				}
 
 				System.out.println("BANK CHANGES-LEADER "+myId+" :: Waiting for client request");
@@ -301,11 +457,9 @@ public class Bank implements Watcher{
 						responseMessage = bc.toString();
 					}
 
-
 				} else if(message.contains("CREATE") && message.indexOf("CREATE")==0) {
 					System.out.println("BANK CHANGES-LEADER "+myId+" :: CREATE REQUEST FROM CLIENT.");
 					//CREATE:[12,Hola,123]
-					//message.indexOf("[");
 					String arrayString = message.substring(7);
 					String[] array = arrayString.replace("[", "").replace("]", "").split(",");
 
@@ -316,7 +470,6 @@ public class Bank implements Watcher{
 				} else if(message.contains("UPDATE") && message.indexOf("UPDATE")==0) {
 					System.out.println("BANK CHANGES-LEADER "+myId+" :: UPDATE REQUEST FROM CLIENT.");
 					//UPDATE:[12,122]
-					//message.indexOf("[");
 					String arrayString = message.substring(7);
 					String[] array = arrayString.replace("[", "").replace("]", "").split(",");
 
@@ -347,7 +500,7 @@ public class Bank implements Watcher{
 				//close the ServerSocket object
 				//server.close();
 
-				//Al ser un banco follower escucha al lider si manda ordenes en el znode /bank/update
+				//Al ser un banco follower escucha al lider si manda ordenes en el znode /bank/changes
 			} else {
 
 				//Solicitar la base de datos por Sockets
@@ -361,7 +514,7 @@ public class Bank implements Watcher{
 						byte[] value = b.array();
 
 						zk.create(BANKS_PATH + DB_PATH + "/req-", value,
-								Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT_SEQUENTIAL);
+								Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL_SEQUENTIAL);
 
 					} catch (Exception e) {
 						System.out.println(e.getMessage());
@@ -429,9 +582,9 @@ public class Bank implements Watcher{
 					System.out.println(e);
 					break;
 				}
-				
+
 				//Comprueba siempre el ultimo de la lista
-				
+
 				if (listChanges.size() > 0) {
 					for(String change : listChanges) {
 						try {
@@ -453,61 +606,61 @@ public class Bank implements Watcher{
 									Stat sACKChange = zk.exists(BANKS_PATH + ACKS_PATH + "/" + change, false);
 									//Comprobar que el Leader ha creado la carpeta de acks correspondiente al cambio
 									if(sACKChange != null) {
-										path = BANKS_PATH + CHANGES_PATH+"/"+listChanges.get(0);
-										//System.out.println(path);
-										byte[] b = zk.getData(path, false, s);
-
-
-										s = zk.exists(path, false);
-
-										ByteBuffer buffer = ByteBuffer.wrap(b);
-										data = new String(buffer.array(), "UTF-8");
-
-										System.out.println("++++ BANK CHANGES "+myId+" :: Data: " + data + "; Path: " + path);
-
-										//Dependiendo de que tipo sea se hace una cosa u otra	
-										if(data.contains("CREATE") && data.indexOf("CREATE")==0) {
-											System.out.println("BANK CHANGES "+myId+" :: CREATE REQUEST FROM LEADER.");
-											//CREATE:[12,Hola,123]
-											//message.indexOf("[");
-											String arrayString = data.substring(7);
-											String[] array = arrayString.replace("[", "").replace("]", "").split(",");
-
-											BankClient bc = new BankClient(Integer.parseInt(array[0]),array[1].replace(" ", ""),Integer.parseInt(array[2].replace(" ","")));
-											boolean createdBC = createBankClient(bc);
-
-											System.out.println("BANK CHANGES "+myId+" :: CREATE = "+createdBC);
-
-										} else if(data.contains("UPDATE") && data.indexOf("UPDATE")==0) {
-											System.out.println("BANK CHANGES "+myId+" :: UPDATE REQUEST FROM LEADER.");
-											//UPDATE:[12,122]
-											//message.indexOf("[");
-											String arrayString = data.substring(7);
-											String[] array = arrayString.replace("[", "").replace("]", "").split(",");
-
-											boolean updatedBC = updateBankClient(Integer.parseInt(array[0]),Integer.parseInt(array[1]));
-
-											System.out.println("BANK CHANGES "+myId+" :: UPDATE = "+updatedBC);
-
-										} else if(data.contains("DELETE") && data.indexOf("DELETE")==0) {
-											System.out.println("BANK CHANGES "+myId+" :: DELETE REQUEST FROM LEADER.");
-											//DELETE:12
-											boolean deletedBC = deleteBankClient(Integer.parseInt(data.substring(7)));
-
-											System.out.println("BANK CHANGES "+myId+" :: DELETE = "+deletedBC);
-										}
-
-										// CREAR UN ZNODE ACK PARA LA PETICION DE CAMBIO QUE GENERO EL LIDER
-										System.out.println("BANK CHANGES "+myId+" :: Created a ACK znode to the Leader");
 										Stat sACK = zk.exists(BANKS_PATH + ACKS_PATH + "/" + change + "/ack-"+myId, false);
 										if(sACK == null) {
+
+											path = BANKS_PATH + CHANGES_PATH+"/"+change;
+
+											s = zk.exists(path, false);
+
+											byte[] b = zk.getData(path, false, s);
+											ByteBuffer buffer = ByteBuffer.wrap(b);
+											data = new String(buffer.array(), "UTF-8");
+
+											System.out.println("++++ BANK CHANGES "+myId+" :: Data: " + data + "; Path: " + path);
+
+											//Dependiendo de que tipo sea se hace una cosa u otra	
+											if(data.contains("CREATE") && data.indexOf("CREATE")==0) {
+												System.out.println("BANK CHANGES "+myId+" :: CREATE REQUEST FROM LEADER.");
+												//CREATE:[12,Hola,123]
+												//message.indexOf("[");
+												String arrayString = data.substring(7);
+												String[] array = arrayString.replace("[", "").replace("]", "").split(",");
+
+												BankClient bc = new BankClient(Integer.parseInt(array[0]),array[1].replace(" ", ""),Integer.parseInt(array[2].replace(" ","")));
+												boolean createdBC = createBankClient(bc);
+
+												System.out.println("BANK CHANGES "+myId+" :: CREATE = "+createdBC);
+
+											} else if(data.contains("UPDATE") && data.indexOf("UPDATE")==0) {
+												System.out.println("BANK CHANGES "+myId+" :: UPDATE REQUEST FROM LEADER.");
+												//UPDATE:[12,122]
+												//message.indexOf("[");
+												String arrayString = data.substring(7);
+												String[] array = arrayString.replace("[", "").replace("]", "").split(",");
+
+												boolean updatedBC = updateBankClient(Integer.parseInt(array[0]),Integer.parseInt(array[1]));
+
+												System.out.println("BANK CHANGES "+myId+" :: UPDATE = "+updatedBC);
+
+											} else if(data.contains("DELETE") && data.indexOf("DELETE")==0) {
+												System.out.println("BANK CHANGES "+myId+" :: DELETE REQUEST FROM LEADER.");
+												//DELETE:12
+												boolean deletedBC = deleteBankClient(Integer.parseInt(data.substring(7)));
+
+												System.out.println("BANK CHANGES "+myId+" :: DELETE = "+deletedBC);
+											}
+
+											// CREAR UN ZNODE ACK PARA LA PETICION DE CAMBIO QUE GENERO EL LIDER
+											System.out.println("BANK CHANGES "+myId+" :: Created a ACK znode to the Leader");
+
 											zk.create(BANKS_PATH + ACKS_PATH + "/" + change + "/ack-"+myId, value,
 													Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL);
 
 											//Paramos la ejecucion hasta que se le mande otro cambio
-											synchronized(mutex) {
+											/*synchronized(mutex) {
 												mutex.wait();
-											}
+											}*/
 										}
 									}
 
@@ -526,7 +679,7 @@ public class Bank implements Watcher{
 							//break;
 						}
 					}
-					
+
 				} else {
 					try {
 						//k.getChildren(BANKS_PATH + CHANGES_PATH, changesWatcher, s);
@@ -580,84 +733,102 @@ public class Bank implements Watcher{
 			System.out.println("------------------Watcher ACKs Individual------------------");
 			System.out.println("BANK "+myId+" :: " + event.getType() + ", " + event.getPath());
 
-			switch (event.getType()){
-			//Se ejcuta si se llama desde un exists
-			case NodeChildrenChanged:
+			try {
+				//Lista de los znodes bancos que hay en la red
+				List<String> banks = new ArrayList<String>();
 				try {
-					//Lista de los znodes bancos que hay en la red
-					List<String> banks = new ArrayList<String>();
-					try {
-						banks = zk.getChildren(BANKS_PATH+ELECTION_PATH, false);
-					} catch (KeeperException | InterruptedException e) {
-						e.printStackTrace();
-					}
-					//Lista de acks enviados por los bancos znodes a un cambio
-					List<String> listIndACKs = new ArrayList<String>();
-					try {
-						//Obtiene la lista de los acks
-						listIndACKs = zk.getChildren(event.getPath(), false, s);
-					} catch (KeeperException | InterruptedException e) { 
-						e.printStackTrace();
-					} 
-
-					if (listIndACKs.size() == banks.size()-1) {
-						for(String ack_n : listIndACKs) {
-							try {
-								String path = event.getPath() + "/" + ack_n;
-								byte[] b = zk.getData(path, false, s);
-
-								s = zk.exists(path, false);
-								//zk.delete(path, s.getVersion());
-
-								ByteBuffer buffer = ByteBuffer.wrap(b);
-								String data = new String(buffer.array(), "UTF-8");
-
-								if(data.equals("received")){
-									zk.delete(event.getPath() +"/"+ack_n, s.getVersion());
-								}
-							} catch (Exception e) {
-								e.printStackTrace();
-							}
-						}
-
-						try {
-							//SE BORRA EL ZNODE DE LOS ACKS
-							s = zk.exists(event.getPath(), false);
-							zk.delete(event.getPath(), s.getVersion());
-
-							//SE BORRA EL ZNODE DE LOS Changes
-							String path = event.getPath().replace(ACKS_PATH, CHANGES_PATH);
-							
-							s = zk.exists(path, false);
-							zk.delete(path, s.getVersion());
-
-						} catch (Exception e) {
-							e.printStackTrace();
-						}
-					} else {
-						//Lanza el Watcher debido a que aun no han contestado todos los integrantes, 
-						//asi cuando conteste otro se lance el watcher
-						zk.getChildren(event.getPath(), acksWatcher);
-					}
-
-
-				} catch (Exception e) {
-					System.out.println("Unexpected Exception process");
-				}
-
-				break;
-				//Se ejecuta si se llama desde un exists y un getData
-
-			default:
-				try {
-					zk.getChildren(event.getPath(), acksWatcher);
+					banks = zk.getChildren(BANKS_PATH+ELECTION_PATH, false);
 				} catch (KeeperException | InterruptedException e) {
 					e.printStackTrace();
 				}
-				break;
+				//Lista de acks enviados por los bancos znodes a un cambio
+				List<String> listIndACKs = new ArrayList<String>();
+				try {
+					//Obtiene la lista de los acks
+					listIndACKs = zk.getChildren(event.getPath(), false, s);
+				} catch (KeeperException | InterruptedException e) { 
+					e.printStackTrace();
+				} 
+				s = zk.exists(event.getPath(), false);
 
+				byte[] b = zk.getData(event.getPath(), false, s);
+
+				ByteBuffer buffer = ByteBuffer.wrap(b);
+				String listIdStringBanksACKChanges = new String(buffer.array(), "UTF-8");
+
+				String[] listIdBanksACKChanges = listIdStringBanksACKChanges.split(",");
+
+				//Compara la lista de ACKS que hay con la lista de followers que enviaron ACKS 
+				//guardado dentro del znode .../acks/update-0001 menos el mismo
+				int numberOfFollowers = listIdBanksACKChanges.length;//Numero de Followers admitidos que hay para enviar ACK en este cambio
+				int numberOfACKs = listIndACKs.size();//Numero de ACKs solo se muestran para los nodos en linea que sean Followers
+				for(String oneFollower : listIdBanksACKChanges) {
+
+					//El lider borra sus acks
+					if(("n_"+oneFollower).equals(myId)) {
+						//Quiere decir que se decrementa ya que el propio lider esta como ack
+						numberOfFollowers = numberOfFollowers-1;
+						//Ya no hace falta borrar su ack pero se debe tener en cuenta ya que su id esta en la lista
+					}
+					//OJO si en la lista de los follower que deberian mandar ACKs si no esta online(/election)
+
+					//Se debe elminar /changes y /acks, hay que ajustar el numero de followers
+					//-Esta en la lista del znode de acks/update-001
+					//-No esta en linea por lo que No esta en ACKs(Ephemeral)
+					if(!banks.contains(("n_"+oneFollower)) && !listIndACKs.contains(("n_"+oneFollower))) {
+						numberOfFollowers = numberOfFollowers - 1;
+					}
+
+					//ESCENARIO #123129: Un Follower conectado con el lider anterior recibe cambios pero antes de efectuarlos
+					//el lider muere, el continua con los cambios y envia los acks(ya el nuevo lider -que puede ser el- se encargara
+					//de gestionar esos acks y borrar los znodes)
+
+					//No se debe eliminar /changes y /acks
+					//-Esta en la lista del zonde de acks/update-001
+					//-Esta en linea
+					//-No esta en ACKs (en este momento pero eventualmente lo enviará)
+
+				}
+				//AHORA SI, comprueba que el numero de ACKs sea el mismo que el que deberia ser(todos los followers enviaron ACK)
+				if (numberOfACKs == numberOfFollowers) {
+					//SE BORRA EL ZNODE DE LOS Changes
+					s = zk.exists(event.getPath().replace(ACKS_PATH, CHANGES_PATH), false);
+					zk.delete(event.getPath().replace(ACKS_PATH, CHANGES_PATH), s.getVersion());
+
+					for(String ack_n : listIndACKs) {
+						try {
+							String path = event.getPath() + "/" + ack_n;
+							byte[] bACK = zk.getData(path, false, s);
+
+							s = zk.exists(path, false);
+							//zk.delete(path, s.getVersion());
+
+							ByteBuffer bufferACK = ByteBuffer.wrap(bACK);
+							String data = new String(bufferACK.array(), "UTF-8");
+
+							if(data.equals("received")){
+								zk.delete(event.getPath() +"/"+ack_n, s.getVersion());
+							}
+						} catch (Exception e) {
+							e.printStackTrace();
+						}
+					}
+
+					//SE BORRA EL ZNODE DE LOS ACKS
+					s = zk.exists(event.getPath(), false);
+					zk.delete(event.getPath(), s.getVersion());
+
+
+				} else {
+					//Lanza el Watcher debido a que aun no han contestado todos los integrantes, 
+					//asi cuando conteste otro se lance el watcher
+					zk.getChildren(event.getPath(), acksWatcher);
+				}
+
+
+			} catch (Exception e) {
+				System.out.println("Unexpected Exception process");
 			}
-
 		}
 	};
 
@@ -704,8 +875,10 @@ public class Bank implements Watcher{
 					//OBTENCION DE LA BASE DE DATOS EN UN STRING
 					boolean remainingData = true;
 					int pre = 0;
+
 					while(remainingData) {
 						String message="";
+						//CONSTRUCCION DEL MENSAJE STRING A ENVIAR DE 1000 CARACTERES EN 1000
 						//Enviar Sockets de 1000 en 1000 entradas de la db
 						java.util.HashMap <Integer, BankClient> db = bankClientDB.getClientDB();
 						Set<Integer> keysSet = db.keySet();
@@ -723,48 +896,64 @@ public class Bank implements Watcher{
 						}
 
 						for(String dbReq_i : dbReq) {
-							boolean erasedDBReq = false;
-							String path = BANKS_PATH + DB_PATH+"/"+dbReq_i;
-							//System.out.println(path);
-							byte[] b = zk.getData(path, false, s);
+							boolean watingResponse = true;
+							while(watingResponse) {
+								boolean erasedDBReq = false;
+								String path = BANKS_PATH + DB_PATH+"/"+dbReq_i;
+								//System.out.println(path);
+								byte[] b = zk.getData(path, false, s);
 
-							s = zk.exists(path, false);
-							//System.out.println(s.getVersion());
-							//Tiene que enviar toda la base de datos a cada znode que haya, a la direccion que hay guardad en el znode
-							Socket socket = null;
-							ObjectOutputStream oos = null;
-							ObjectInputStream ois = null;
-							//Get the Ip and port of the bank_follower where the leader have to send the db
-							ByteBuffer buffer = ByteBuffer.wrap(b);
-							String[] data = new String(buffer.array(), "UTF-8").split(":");
+								s = zk.exists(path, false);
 
-							//establish socket connection to server
-							try{
-								socket = new Socket(data[0], Integer.parseInt(data[1]));
-								//write to socket using ObjectOutputStream
-								oos = new ObjectOutputStream(socket.getOutputStream());
-								System.out.println("Sending db to Socket Server (Follower Bank)");
-								oos.writeObject(message);
+								//System.out.println(s.getVersion());
+								//Tiene que enviar toda la base de datos a cada znode que haya, a la direccion que hay guardad en el znode
+								Socket socket = null;
+								ObjectOutputStream oos = null;
+								ObjectInputStream ois = null;
+								//Get the Ip and port of the bank_follower where the leader have to send the db
+								ByteBuffer buffer = ByteBuffer.wrap(b);
+								String[] data = new String(buffer.array(), "UTF-8").split(":");
 
-								//read the server response message
-								ois = new ObjectInputStream(socket.getInputStream());
-								String messageResp = (String) ois.readObject();
-								System.out.println("Follower Bank RESPONSE: " + messageResp);
-								//close resources
-								ois.close();
-								oos.close();
+								//establish socket connection to server
+								try{
+									socket = new Socket(data[0], Integer.parseInt(data[1]));
+									//write to socket using ObjectOutputStream
+									oos = new ObjectOutputStream(socket.getOutputStream());
+									System.out.println("Sending db to Socket Server (Follower Bank)");
+									oos.writeObject(message);
 
-								socket.close();
-							} catch (Exception e) {
-								//La peticion de base de datos proviene de un servidor que no
-								//esta disponible
-								zk.delete(path, s.getVersion());
-								erasedDBReq = true;
-							}
+									//Aqui debe esperar a que responda el otro follower
+									//read the server response message
+									ois = new ObjectInputStream(socket.getInputStream());
+									String messageResp = (String) ois.readObject();
+									if(messageResp.equals("true")) {
+										watingResponse=false;
+									}
+									System.out.println("Follower Bank RESPONSE: " + messageResp);
+									//close resources
+									ois.close();
+									oos.close();
 
-							if(!remainingData && !erasedDBReq) {
-								//BORRAR EL ZNODE QUE CREO LA PETICION DE BASE DE DATOS SI YA NO HAY MAS DATOS
-								zk.delete(path, s.getVersion());
+									socket.close();
+								} catch (Exception e) {
+									//La peticion de base de datos proviene de un servidor que no
+									//esta disponible
+									Stat sDB = zk.exists(path, false);
+									//Si se ha borrado el follower para la ejcucion de todos
+									if(sDB==null) {
+										remainingData=false;
+										watingResponse=false;
+										zk.delete(path, s.getVersion());
+										erasedDBReq = true;
+									}
+
+								}
+
+
+								if(!remainingData && !erasedDBReq && !watingResponse) {
+									//BORRAR EL ZNODE QUE CREO LA PETICION DE BASE DE DATOS SI YA NO HAY MAS DATOS
+									zk.delete(path, s.getVersion());
+								}
 							}
 						}
 					}

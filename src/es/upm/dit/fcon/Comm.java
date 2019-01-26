@@ -7,12 +7,12 @@ import java.lang.ClassNotFoundException;
 import java.net.Socket;
 import java.net.UnknownHostException;
 
-public class zkComm {
+public class Comm {
 
     //socket server port on which it will listen
     private static int port = 3000;
 
-	public zkComm() throws IOException{
+	public Comm() throws IOException{
         
 	}
 	
