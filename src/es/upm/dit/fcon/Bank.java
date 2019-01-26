@@ -31,6 +31,7 @@ import org.apache.zookeeper.data.Stat;
 
 public class Bank implements Watcher{
 	//VARIABLES BANK
+	private String ip = "localhost";
 	private BankClientDB bankClientDB;
 	private boolean isLeader = false;
 
@@ -56,7 +57,9 @@ public class Bank implements Watcher{
 	private static ServerSocket serverDB = null;
 	private static int port = 3000;
 	private static int portDB = 4000;
-	public Bank() {
+	public Bank(String ip) {
+		this.ip = ip;
+		
 		bankClientDB = new BankClientDB();
 		try {
 			zkl = new zkLeader(this);
@@ -506,7 +509,7 @@ public class Bank implements Watcher{
 				//Solicitar la base de datos por Sockets
 				if(flagNuevo) {
 					flagNuevo = false;
-					String dirIp = "localhost";
+					String dirIp = ip;
 					try {
 
 						String content = dirIp+":"+portDB;

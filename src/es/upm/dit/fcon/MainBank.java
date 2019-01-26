@@ -111,7 +111,7 @@ public class MainBank {
 		if(bank_znode) {
 			sc.close();
 			
-			Bank bank = new Bank();
+			Bank bank = new Bank(args[0]);
 			if (bank.isLeader()) mainBank.initMembers(bank);
 			
 			bank.start();
