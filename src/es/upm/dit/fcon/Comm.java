@@ -11,9 +11,9 @@ public class Comm {
 
     //socket server port on which it will listen
     private static int port = 3000;
-
-	public Comm() throws IOException{
-        
+    private static String ip = "localhost";
+	public Comm(String ip) throws IOException{
+        this.ip = ip;
 	}
 	
 	
@@ -25,7 +25,7 @@ public class Comm {
         ObjectInputStream ois = null;
             
         //establish socket connection to server
-        socket = new Socket(/*host.getHostName()*/"localhost", port);
+        socket = new Socket(/*host.getHostName()*/ip, port);
         //write to socket using ObjectOutputStream
         oos = new ObjectOutputStream(socket.getOutputStream());
         System.out.println("Sending request to Socket Server (Leader Bank)");
