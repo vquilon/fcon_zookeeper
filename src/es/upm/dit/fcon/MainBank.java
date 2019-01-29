@@ -11,7 +11,7 @@ public class MainBank {
 	public void initMembers(Bank bank) {
 		//Solo se ejecuta si es un Banco y es el lider
 		
-		if (!bank.createBankClient(new BankClient(1, "Angel AlarcÃ³n", 100))) {
+		if (!bank.createBankClient(new BankClient(1, "Angel Alarcón", 100))) {
 			return;
 		}
 		if (!bank.createBankClient(new BankClient(2, "Bernardo Bueno", 200))) {
@@ -20,7 +20,7 @@ public class MainBank {
 		if (!bank.createBankClient(new BankClient(3, "Carlos Cepeda", 300))) {
 			return;
 		}
-		if (!bank.createBankClient(new BankClient(4, "Daniel DÃ­az", 400))) {
+		if (!bank.createBankClient(new BankClient(4, "Daniel Díaz", 400))) {
 			return;
 		}
 		if (!bank.createBankClient(new BankClient(5, "Eugenio Escobar", 500))) {
@@ -46,7 +46,9 @@ public class MainBank {
 		}
 
 		System. out .print(">>> Enter name (String) = ");
-		name = sc.next();
+		sc.nextLine();
+		name = sc.nextLine();
+		
 
 		System. out .print(">>> Enter balance (int) = ");
 		if (sc.hasNextInt()) {
@@ -110,8 +112,13 @@ public class MainBank {
 		
 		if(bank_znode) {
 			sc.close();
-			
-			Bank bank = new Bank(args[0]);
+			String ip = "";
+			if(args.length == 0) {
+				ip = "localhost";
+			} else {
+				ip = args[0];
+			}
+			Bank bank = new Bank(ip);
 			if (bank.isLeader()) mainBank.initMembers(bank);
 			
 			bank.start();
@@ -121,13 +128,14 @@ public class MainBank {
 		}
 		
 		else {
-			Comm comm = new Comm(args[0]);
+			//Se crea la comunicación con las direcciones ip de los servidores
+			Comm comm = new Comm(args);
 			while (!exit && !bank_znode) {
 				try {
 					correct = false;
 					menuKey = 0;
 					while (!correct) {
-						System.out.println(">>> Enter opn cliente.: 1) Create. 2) Read. 3) Update. 4) Delete. 5) BankDB. 6) Exit");				
+						System.out.println(">>> Enter opn cliente.: 1) Create. 2) Read. 3) Update. 4) Delete. 5) Exit");				
 						if (sc.hasNextInt()) {
 							menuKey = sc.nextInt();
 							correct = true;
@@ -141,27 +149,38 @@ public class MainBank {
 					case 1: // Create client
 						//Crear un znodo para avisar al resto que tienen que actualizar su Bank
 						//bank.createBankClient(mainBank.readClient(sc));
-						comm.createBankClient(mainBank.readClient(sc));
-
+						BankClient bc= mainBank.readClient(sc);
+						if(bc != null) {
+							boolean created = comm.createBankClient(bc);
+							if(created) {
+								System.out.println("The account #"+bc.getAccountNumber()+" with name "+bc.getName()+" and balance "+bc.getBalance()+" has been created successfully");
+							} else {
+								System.out.println("There was an error, try again");
+							}
+						} else {
+							System.out.println("There was an error with the input data, try again");
+						}
+						
 						break;
 					case 2: // Read client
 						System. out .print(">>> Enter account number (int) = ");
 						if (sc.hasNextInt()) {
 							accNumber = sc.nextInt();
-							//bankClient = bank.readBankClient(accNumber);
 							bankClient = comm.readBankClient(accNumber);
-							System.out.println(bankClient);
+							System.out.println("The account #"+bankClient.getAccountNumber()+" belongs to "+bankClient.getName()+" and has a balance of: "+bankClient.getBalance());
 						} else {
 							System.out.println("The provised text provided is not an integer");
 							sc.next();
 						}
 						break;
 					case 3: // Update client
+						boolean badData = false;
 						System. out .print(">>> Enter account number (int) = ");
 						if (sc.hasNextInt()) {
 							accNumber = sc.nextInt();
 						} else {
 							System.out.println("The provised text provided is not an integer");
+							badData = true;
 							sc.next();
 						}
 						System. out .print(">>> Enter balance (int) = ");
@@ -169,17 +188,34 @@ public class MainBank {
 							balance = sc.nextInt();
 						} else {
 							System.out.println("The provised text provided is not an integer");
+							badData = true;
 							sc.next();
 						}
 						//bank.updateBankClient(accNumber, balance);
-						comm.updateBankClient(accNumber, balance);
+						if(!badData) {
+							boolean updated = comm.updateBankClient(accNumber, balance);
+							if(updated) {
+								System.out.println("The balance of the account #"+accNumber+" has been updated to: "+balance);
+							} else {
+								System.out.println("There was an error, try again");
+							}
+						} else {
+							System.out.println("There was an error with the input data, try again");
+						}
+						
+						
 						break;
 					case 4: // Delete client
 						System. out .print(">>> Enter account number (int) = ");
 						if (sc.hasNextInt()) {
 							accNumber = sc.nextInt();
 							//status = bank.deleteBankClient(accNumber);
-							comm.deleteBankClient(accNumber);
+							boolean deleted = comm.deleteBankClient(accNumber);
+							if(deleted) {
+								System.out.println("The account #"+accNumber+" has been deleted");
+							} else {
+								System.out.println("There was an error, try again");
+							}
 						} else {
 							System.out.println("The provised text provided is not an integer");
 							sc.next();
@@ -189,7 +225,7 @@ public class MainBank {
 						String aux = bank.toString();
 						System.out.println(bank.toString());
 						break;*/
-					case 6:
+					case 5:
 						exit = true;	
 						//bank.close();
 					default:

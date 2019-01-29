@@ -59,7 +59,7 @@ public class Bank implements Watcher{
 	private static int portDB = 4000;
 	public Bank(String ip) {
 		this.ip = ip;
-		
+
 		bankClientDB = new BankClientDB();
 		try {
 			zkl = new zkLeader(this);
@@ -441,60 +441,67 @@ public class Bank implements Watcher{
 
 				System.out.println("BANK CHANGES-LEADER "+myId+" :: Waiting for client request");
 
-				//creating socket and waiting for client connection
-				Socket socket = server.accept();
-				//read from socket to ObjectInputStream object
-				ObjectInputStream ois = new ObjectInputStream(socket.getInputStream());
-				//convert ObjectInputStream object to String
-				String message = (String) ois.readObject();
-				System.out.println("BANK CHANGES-LEADER "+myId+" :: Message Received: " + message);
+				try {
+					//creating socket and waiting for client connection
+					Socket socket = server.accept();
+					//read from socket to ObjectInputStream object
+					ObjectInputStream ois = new ObjectInputStream(socket.getInputStream());
+					//convert ObjectInputStream object to String
+					String message = (String) ois.readObject();
+					System.out.println("BANK CHANGES-LEADER "+myId+" :: Message Received: " + message);
 
-				String responseMessage="";
-				if(message.contains("READ") && message.indexOf("READ")==0) {
-					//READ:12
-					System.out.println("BANK CHANGES-LEADER "+myId+" :: READ REQUEST FROM CLIENT.");
-					BankClient bc = readBankClient(Integer.parseInt(message.substring(5)));
-					if(bc == null) {
-						responseMessage = "Null";
-					} else {
-						responseMessage = bc.toString();
+					String responseMessage="";
+					if(message.contains("READ") && message.indexOf("READ")==0) {
+						//READ:12
+						System.out.println("BANK CHANGES-LEADER "+myId+" :: READ REQUEST FROM CLIENT.");
+						BankClient bc = readBankClient(Integer.parseInt(message.substring(5)));
+						if(bc == null) {
+							responseMessage = "Null";
+						} else {
+							responseMessage = bc.toString();
+						}
+
+					} else if(message.contains("CREATE") && message.indexOf("CREATE")==0) {
+						System.out.println("BANK CHANGES-LEADER "+myId+" :: CREATE REQUEST FROM CLIENT.");
+						//CREATE:[12,Hola,123]
+						String arrayString = message.substring(7);
+						int accN = Integer.parseInt(arrayString.substring(arrayString.indexOf("ACCN:")+5,arrayString.indexOf("BAL:")));
+						int bal = Integer.parseInt(arrayString.substring(arrayString.indexOf("BAL:")+4,arrayString.indexOf("NAME:")));
+						String name = arrayString.substring(arrayString.indexOf("NAME:")+5);
+
+						BankClient bc = new BankClient(accN, name, bal);
+						boolean createdBC = createBankClient(bc);
+						responseMessage = ""+createdBC;
+
+					} else if(message.contains("UPDATE") && message.indexOf("UPDATE")==0) {
+						System.out.println("BANK CHANGES-LEADER "+myId+" :: UPDATE REQUEST FROM CLIENT.");
+						//UPDATE:[12,122]
+						String arrayString = message.substring(7);
+						String[] array = arrayString.replace("[", "").replace("]", "").split(",");
+
+						boolean updatedBC = updateBankClient(Integer.parseInt(array[0]),Integer.parseInt(array[1].replace(" ","")));
+						responseMessage = ""+updatedBC;
+
+					} else if(message.contains("DELETE") && message.indexOf("DELETE")==0) {
+						System.out.println("LEADER :: DELETE REQUEST FROM CLIENT.");
+						//DELETE:12
+						boolean deletedBC = deleteBankClient(Integer.parseInt(message.substring(7)));
+						responseMessage = ""+deletedBC;
 					}
 
-				} else if(message.contains("CREATE") && message.indexOf("CREATE")==0) {
-					System.out.println("BANK CHANGES-LEADER "+myId+" :: CREATE REQUEST FROM CLIENT.");
-					//CREATE:[12,Hola,123]
-					String arrayString = message.substring(7);
-					String[] array = arrayString.replace("[", "").replace("]", "").split(",");
+					//create ObjectOutputStream object
+					ObjectOutputStream oos = new ObjectOutputStream(socket.getOutputStream());
+					//write object to Socket
+					oos.writeObject(responseMessage);
 
-					BankClient bc = new BankClient(Integer.parseInt(array[0]),array[1].replace(" ","").replaceAll(";"," "),Integer.parseInt(array[2].replace(" ","")));
-					boolean createdBC = createBankClient(bc);
-					responseMessage = ""+createdBC;
-
-				} else if(message.contains("UPDATE") && message.indexOf("UPDATE")==0) {
-					System.out.println("BANK CHANGES-LEADER "+myId+" :: UPDATE REQUEST FROM CLIENT.");
-					//UPDATE:[12,122]
-					String arrayString = message.substring(7);
-					String[] array = arrayString.replace("[", "").replace("]", "").split(",");
-
-					boolean updatedBC = updateBankClient(Integer.parseInt(array[0]),Integer.parseInt(array[1].replace(" ","")));
-					responseMessage = ""+updatedBC;
-
-				} else if(message.contains("DELETE") && message.indexOf("DELETE")==0) {
-					System.out.println("LEADER :: DELETE REQUEST FROM CLIENT.");
-					//DELETE:12
-					boolean deletedBC = deleteBankClient(Integer.parseInt(message.substring(7)));
-					responseMessage = ""+deletedBC;
+					//close resources
+					ois.close();
+					oos.close();
+					socket.close();
+				} catch(Exception e) {
+					e.printStackTrace();
 				}
 
-				//create ObjectOutputStream object
-				ObjectOutputStream oos = new ObjectOutputStream(socket.getOutputStream());
-				//write object to Socket
-				oos.writeObject(responseMessage);
-
-				//close resources
-				ois.close();
-				oos.close();
-				socket.close();
 
 
 				//terminate the server if client sends exit request
@@ -523,6 +530,7 @@ public class Bank implements Watcher{
 						System.out.println(e.getMessage());
 						System.out.println("Unexpected Exception process barrier");
 					}
+
 					if(serverDB == null) {
 						//create the socket server object
 						serverDB = new ServerSocket(portDB);
@@ -534,6 +542,8 @@ public class Bank implements Watcher{
 						//creating socket and waiting for client connection or 60 seconds
 						serverDB.setSoTimeout(60000);
 						try {
+
+							System.out.println("Esperando respuesta");
 							Socket socket=serverDB.accept();
 
 							//read from socket to ObjectInputStream object
@@ -553,9 +563,12 @@ public class Bank implements Watcher{
 								arrayDB[arrayDB.length-1] = arrayDB[arrayDB.length-1].substring(0, arrayDB[arrayDB.length-1].length()-3);
 							}
 							boolean rM = true;
-							for(String dbCli : arrayDB) {
-								String[] adbCli = dbCli.split(",");
-								BankClient bcli = new BankClient(Integer.parseInt(adbCli[0]), adbCli[1].replace(" ", ""),Integer.parseInt(adbCli[2].replace(" ","")));
+							for(String dbCli : arrayDB) {								
+								int accN = Integer.parseInt(dbCli.substring(0,dbCli.indexOf(",")));
+								int bal = Integer.parseInt(dbCli.substring(dbCli.lastIndexOf(",")+2, dbCli.length()));
+								String name = dbCli.substring(dbCli.indexOf(",")+2,dbCli.lastIndexOf(","));
+
+								BankClient bcli = new BankClient(accN, name, bal);
 								rM = rM && createBankClient(bcli) ;
 							}
 
@@ -625,12 +638,14 @@ public class Bank implements Watcher{
 											//Dependiendo de que tipo sea se hace una cosa u otra	
 											if(data.contains("CREATE") && data.indexOf("CREATE")==0) {
 												System.out.println("BANK CHANGES "+myId+" :: CREATE REQUEST FROM LEADER.");
-												//CREATE:[12,Hola,123]
+												//CREATE:[12, Hola, 123]
 												//message.indexOf("[");
-												String arrayString = data.substring(7);
-												String[] array = arrayString.replace("[", "").replace("]", "").split(",");
+												String arrayString = data.substring(7).replace("[", "").replace("]", "");
+												int accN = Integer.parseInt(arrayString.substring(0,arrayString.indexOf(",")));
+												int bal = Integer.parseInt(arrayString.substring(arrayString.lastIndexOf(",")+2, arrayString.length()));
+												String name = arrayString.substring(arrayString.indexOf(",")+2,arrayString.lastIndexOf(","));
 
-												BankClient bc = new BankClient(Integer.parseInt(array[0]),array[1].replace(" ", ""),Integer.parseInt(array[2].replace(" ","")));
+												BankClient bc = new BankClient(accN,name,bal);
 												boolean createdBC = createBankClient(bc);
 
 												System.out.println("BANK CHANGES "+myId+" :: CREATE = "+createdBC);
@@ -920,6 +935,7 @@ public class Bank implements Watcher{
 								//establish socket connection to server
 								try{
 									socket = new Socket(data[0], Integer.parseInt(data[1]));
+									System.out.println("Server follower bank avalible");
 									//write to socket using ObjectOutputStream
 									oos = new ObjectOutputStream(socket.getOutputStream());
 									System.out.println("Sending db to Socket Server (Follower Bank)");
@@ -941,6 +957,7 @@ public class Bank implements Watcher{
 								} catch (Exception e) {
 									//La peticion de base de datos proviene de un servidor que no
 									//esta disponible
+									System.out.println("Server follower bank not avalible");
 									Stat sDB = zk.exists(path, false);
 									//Si se ha borrado el follower para la ejcucion de todos
 									if(sDB==null) {
